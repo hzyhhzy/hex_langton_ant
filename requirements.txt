@@ -1,0 +1,5 @@
+numpy
+numba
+pillow
+opencv-python
+imageio

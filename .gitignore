@@ -1,0 +1,26 @@
+# Generated images and videos
+*.png
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.gif
+
+# Generated simulation data and archives
+*.npz
+*.csv
+*.7z
+*.zip
+*.tar
+*.tar.gz
+results/
+hex_langton_*frames*/
+hex_langton_*keyframes*/
+hex_langton_powers*/
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
