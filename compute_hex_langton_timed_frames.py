@@ -95,6 +95,90 @@ def advance_until_margin(
     return completed, q, r, direction, black, minq, maxq, minr, maxr, mins, maxs
 
 
+@njit
+def advance_until_margin_v2(
+    grid,
+    steps,
+    margin,
+    offset,
+    q,
+    r,
+    direction,
+    black,
+    minq,
+    maxq,
+    minr,
+    maxr,
+    mins,
+    maxs,
+):
+    completed = 0
+    height = grid.shape[0]
+    width = grid.shape[1]
+    q_hi = height - margin - 1
+    r_hi = width - margin - 1
+    flat = grid.ravel()
+    pos = q * width + r
+
+    for _ in range(steps):
+        if flat[pos]:
+            direction += 1
+            if direction == 6:
+                direction = 0
+            flat[pos] = 0
+            black -= 1
+        else:
+            if direction == 0:
+                direction = 5
+            else:
+                direction -= 1
+            flat[pos] = 1
+            black += 1
+
+        if direction == 0:
+            q += 1
+            pos += width
+        elif direction == 1:
+            q += 1
+            r -= 1
+            pos += width - 1
+        elif direction == 2:
+            r -= 1
+            pos -= 1
+        elif direction == 3:
+            q -= 1
+            pos -= width
+        elif direction == 4:
+            q -= 1
+            r += 1
+            pos += 1 - width
+        else:
+            r += 1
+            pos += 1
+
+        aq = q - offset
+        ar = r - offset
+        s = -aq - ar
+        if q < minq:
+            minq = q
+        if q > maxq:
+            maxq = q
+        if r < minr:
+            minr = r
+        if r > maxr:
+            maxr = r
+        if s < mins:
+            mins = s
+        if s > maxs:
+            maxs = s
+
+        completed += 1
+        if q <= margin or r <= margin or q >= q_hi or r >= r_hi:
+            break
+
+    return completed, q, r, direction, black, minq, maxq, minr, maxr, mins, maxs
+
+
 def speed_at_time(seconds):
     if seconds < INITIAL_SPEED_DURATION_SECONDS:
         return float(INITIAL_SPEED_STEPS_PER_SECOND)
@@ -177,7 +261,7 @@ def advance_dynamic(grid, state, offset, steps):
     expansions = 0
     while done < steps:
         delta = min(CHUNK_STEPS, steps - done)
-        advanced = advance_until_margin(grid, delta, MARGIN_CELLS, offset, *state)
+        advanced = advance_until_margin_v2(grid, delta, MARGIN_CELLS, offset, *state)
         completed = advanced[0]
         state = advanced[1:]
         done += completed
@@ -412,7 +496,7 @@ def main():
     grid, state, offset, current_step, next_frame_index, next_backup_index = load_checkpoint(output_dir)
 
     warm = np.zeros((20, 20), np.uint8)
-    advance_until_margin(warm, 10, 2, 10, 10, 10, 0, 0, 10, 10, 10, 10, 0, 0)
+    advance_until_margin_v2(warm, 10, 2, 10, 10, 10, 0, 0, 10, 10, 10, 10, 0, 0)
 
     rows = [row for row in rows if int(row["frame"]) < next_frame_index]
     start = perf_counter()
@@ -424,13 +508,25 @@ def main():
     for index in range(next_frame_index, len(schedule)):
         schedule_row = schedule[index]
         target_step = int(schedule_row["step"])
-        grid, state, offset, _ = advance_dynamic(grid, state, offset, target_step - current_step)
+        frame_start = perf_counter()
+        previous_step = current_step
+        frame_steps = target_step - previous_step
+        grid, state, offset, _ = advance_dynamic(grid, state, offset, frame_steps)
         current_step = target_step
         row = save_frame(output_dir, schedule_row, state, offset, grid)
         rows.append(row)
+        frame_elapsed = perf_counter() - frame_start
+        frame_speed_msteps = frame_steps / frame_elapsed / 1_000_000 if frame_elapsed > 0 else 0.0
+        print(
+            f"frame {index + 1}/{len(schedule)}  "
+            f"step={current_step:,}  "
+            f"delta={frame_steps:,}  "
+            f"black={row['black_cells']:,}  "
+            f"time={frame_elapsed:.3f}s  "
+            f"speed={frame_speed_msteps:.3f} Mstep/s"
+        )
         if index % 30 == 0 or index == len(schedule) - 1:
             write_metadata(output_dir, rows)
-            print(f"frame {index + 1}/{len(schedule)}  step={current_step:,}  black={row['black_cells']:,}")
 
         while next_backup_index < len(backups) and current_step >= backups[next_backup_index]:
             save_checkpoint(output_dir, current_step, index + 1, next_backup_index + 1, state, offset, grid)

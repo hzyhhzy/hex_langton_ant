@@ -19,6 +19,7 @@ FRAME_STRIDE = 16
 WIDTH = 1920
 HEIGHT = 1200
 DRAW_SCALE_BAR = True
+DRAW_CARTESIAN_GRID = False
 MIN_VIEW_WIDTH_CELLS = 25
 MIN_VIEW_HEIGHT_CELLS = 17
 MARGIN_FRACTION = 0.05
@@ -37,6 +38,11 @@ HUD_X = 48
 HUD_Y = 44
 SCALE_BAR_X = 76
 SCALE_BAR_BOTTOM_MARGIN = 82
+CARTESIAN_GRID_TARGET_PX = 180
+CARTESIAN_GRID_COLOR = (226, 226, 226)
+CARTESIAN_AXIS_COLOR = (178, 178, 178)
+CARTESIAN_GRID_WIDTH = 2
+CARTESIAN_AXIS_WIDTH = 3
 
 
 METADATA_FILE = "metadata.csv"
@@ -106,6 +112,10 @@ def nice_scale_cells(pixel_scale, target_pixels=180):
     return int(10 * base)
 
 
+def nice_cartesian_step(pixel_scale, target_pixels=CARTESIAN_GRID_TARGET_PX):
+    return sqrt(3) * nice_scale_cells(pixel_scale, target_pixels)
+
+
 def format_value(value):
     value = float(value)
     if abs(value) > 1_000_000:
@@ -131,6 +141,40 @@ def draw_scale_bar(draw, width, height, pixel_scale, font):
     draw.line((x0, y0 - 8, x0, y0 + 8), fill=(20, 20, 20), width=3)
     draw.line((x1, y0 - 8, x1, y0 + 8), fill=(20, 20, 20), width=3)
     draw.text((x0, y0 - text_h - 12 - SCALE_LABEL_EXTRA_UP_PX), label, fill=(20, 20, 20), font=font)
+
+
+def draw_cartesian_grid(draw, view):
+    scale = view["scale"]
+    step = nice_cartesian_step(scale)
+    screen_origin_x = WIDTH * (0.5 + CAMERA_SCREEN_OFFSET_X_FRACTION)
+    screen_origin_y = HEIGHT / 2
+
+    min_x = view["center_x"] + (0 - screen_origin_x) / scale
+    max_x = view["center_x"] + (WIDTH - screen_origin_x) / scale
+    min_y = view["center_y"] + (0 - screen_origin_y) / scale
+    max_y = view["center_y"] + (HEIGHT - screen_origin_y) / scale
+
+    first_x = floor(min_x / step) * step
+    x = first_x
+    while x <= max_x:
+        px = screen_origin_x + (x - view["center_x"]) * scale
+        draw.line((px, 0, px, HEIGHT), fill=CARTESIAN_GRID_COLOR, width=CARTESIAN_GRID_WIDTH)
+        x += step
+
+    first_y = floor(min_y / step) * step
+    y = first_y
+    while y <= max_y:
+        py = screen_origin_y + (y - view["center_y"]) * scale
+        draw.line((0, py, WIDTH, py), fill=CARTESIAN_GRID_COLOR, width=CARTESIAN_GRID_WIDTH)
+        y += step
+
+    axis_x = screen_origin_x - view["center_x"] * scale
+    if 0 <= axis_x <= WIDTH:
+        draw.line((axis_x, 0, axis_x, HEIGHT), fill=CARTESIAN_AXIS_COLOR, width=CARTESIAN_AXIS_WIDTH)
+
+    axis_y = screen_origin_y - view["center_y"] * scale
+    if 0 <= axis_y <= HEIGHT:
+        draw.line((0, axis_y, WIDTH, axis_y), fill=CARTESIAN_AXIS_COLOR, width=CARTESIAN_AXIS_WIDTH)
 
 
 class AnimationWriter:
@@ -228,11 +272,11 @@ def smoothed_views(rows):
 
     views = []
     for i in range(len(rows)):
-        center_x, center_y = axial_center(smooth_q[i], smooth_r[i])
+        _, center_y = axial_center(smooth_q[i], smooth_r[i])
         scale = available_h / (3 * radius[i])
         views.append(
             {
-                "center_x": float(center_x),
+                "center_x": 0.0,
                 "center_y": float(center_y),
                 "scale": scale,
                 "size_width": 2 * float(radius[i]),
@@ -294,6 +338,9 @@ def render_frame(row, cells, meta, view, speed_multiplier=1):
     label_font = load_font(LABEL_FONT_SIZE)
     scale_font = load_font(SCALE_BAR_FONT_SIZE)
 
+    if DRAW_CARTESIAN_GRID:
+        draw_cartesian_grid(draw, view)
+
     if effective_side >= HEX_RENDER_MIN_RADIUS_PX:
         for cell_q, cell_r in cells:
             cx, cy = to_pixel(int(cell_q) * coord_scale, int(cell_r) * coord_scale)
@@ -327,6 +374,7 @@ def render_frame(row, cells, meta, view, speed_multiplier=1):
 
 def main():
     global FRAME_DIR, OUTPUT, FALLBACK_GIF_OUTPUT, FPS, FRAME_STRIDE, WIDTH, HEIGHT, FINAL_HOLD_FRAMES
+    global DRAW_CARTESIAN_GRID
 
     parser = argparse.ArgumentParser(description="Render timed hex Langton ant frames into a video.")
     parser.add_argument("--frame-dir", default=FRAME_DIR, help="Directory containing metadata.csv and frame npz files.")
@@ -337,6 +385,7 @@ def main():
     parser.add_argument("--width", type=int, default=WIDTH, help="Output width in pixels.")
     parser.add_argument("--height", type=int, default=HEIGHT, help="Output height in pixels.")
     parser.add_argument("--final-hold-frames", type=int, default=FINAL_HOLD_FRAMES, help="Extra copies of the final frame.")
+    parser.add_argument("--show-cartesian-grid", action="store_true", help="Draw light gray Cartesian axes and grid lines.")
     args = parser.parse_args()
 
     FRAME_DIR = args.frame_dir
@@ -347,6 +396,7 @@ def main():
     WIDTH = args.width
     HEIGHT = args.height
     FINAL_HOLD_FRAMES = args.final_hold_frames
+    DRAW_CARTESIAN_GRID = args.show_cartesian_grid
     if FRAME_STRIDE < 1:
         raise ValueError("--stride must be >= 1")
     if FPS < 1:
